@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 from clash import ClashReport
 from loader import Table
-from bcf_exporter import BCFExporter
+# from bcf_exporter import BCFExporter
     
 if __name__ == "__main__":
 
@@ -9,5 +9,5 @@ if __name__ == "__main__":
         soup = BeautifulSoup(f, "lxml")
         table = Table(soup)
         report = ClashReport(table)
-        exporter = BCFExporter(report)
-        exporter.export()
+        # exporter = BCFExporter(report)
+        # exporter.export()

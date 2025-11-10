@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 import plotly.express as px
 import plotly.graph_objects as go
 from test_modules import Table, ClashReport
-from bcf_exporter import BCFExporter
+# from bcf_exporter import BCFExporter
 import tempfile
 import base64
 
@@ -83,22 +83,22 @@ class ClashAnalyzerApp:
         report = report.flatten_report()
         st.dataframe(report, use_container_width=True)
 
-        st.markdown("---")
-        if st.button("📦 Exportar Relatório BCFZIP"):
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".bcfzip") as tmp:
-                    exporter = BCFExporter(report)
-                    exporter.export(output_file=tmp.name)
-                    tmp.flush()
-                    tmp.seek(0)
+        # st.markdown("---")
+        # if st.button("📦 Exportar Relatório BCFZIP"):
+        #     try:
+        #         with tempfile.NamedTemporaryFile(delete=False, suffix=".bcfzip") as tmp:
+        #             exporter = BCFExporter(report)
+        #             exporter.export(output_file=tmp.name)
+        #             tmp.flush()
+        #             tmp.seek(0)
 
-                    b64 = base64.b64encode(tmp.read()).decode()
-                    href = f'<a href="data:application/zip;base64,{b64}" download="clash_report.bcfzip">⬇️ Clique para baixar o arquivo BCF</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+        #             b64 = base64.b64encode(tmp.read()).decode()
+        #             href = f'<a href="data:application/zip;base64,{b64}" download="clash_report.bcfzip">⬇️ Clique para baixar o arquivo BCF</a>'
+        #             st.markdown(href, unsafe_allow_html=True)
 
-                    st.success("Exportação concluída com sucesso!")
-            except Exception as e:
-                st.error(f"Erro ao exportar BCF: {e}")
+        #             st.success("Exportação concluída com sucesso!")
+        #     except Exception as e:
+        #         st.error(f"Erro ao exportar BCF: {e}")
 
         col1, col2 = st.columns(2)
         self.show_combinations(df, col1, col2)
