@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 import plotly.express as px
 import plotly.graph_objects as go
 from test_modules import Table, ClashReport
-# from bcf_exporter import BCFExporter
 import tempfile
 import base64
 
@@ -25,7 +24,6 @@ class ConfigManager:
     def save(cls, config):
         with open(cls.PATH, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
-
 
 class ClashAnalyzerApp:
     def __init__(self):
@@ -80,28 +78,12 @@ class ClashAnalyzerApp:
 
         df = self.flatten(data)
         st.markdown("### Resultados da Análise")
-        report = report.flatten_report()
-        st.dataframe(report, use_container_width=True)
-
-        # st.markdown("---")
-        # if st.button("📦 Exportar Relatório BCFZIP"):
-        #     try:
-        #         with tempfile.NamedTemporaryFile(delete=False, suffix=".bcfzip") as tmp:
-        #             exporter = BCFExporter(report)
-        #             exporter.export(output_file=tmp.name)
-        #             tmp.flush()
-        #             tmp.seek(0)
-
-        #             b64 = base64.b64encode(tmp.read()).decode()
-        #             href = f'<a href="data:application/zip;base64,{b64}" download="clash_report.bcfzip">⬇️ Clique para baixar o arquivo BCF</a>'
-        #             st.markdown(href, unsafe_allow_html=True)
-
-        #             st.success("Exportação concluída com sucesso!")
-        #     except Exception as e:
-        #         st.error(f"Erro ao exportar BCF: {e}")
+        report_flat = report.flatten_report()
+        st.dataframe(report_flat, use_container_width=True)
 
         col1, col2 = st.columns(2)
         self.show_combinations(df, col1, col2)
+        self.show_bim_combinations(df, col1, col2)
         self.show_map(df)
         self.show_distribution(df)
 
@@ -117,6 +99,11 @@ class ClashAnalyzerApp:
 
         rows = []
         for item in data:
+            bim_normas = (
+                item.get("itemsInfo", {}).get("first", {}).get("norma_bim", "Unknown") + " / " +
+                item.get("itemsInfo", {}).get("second", {}).get("norma_bim", "Unknown")
+            )
+
             rows.append({
                 "Item ID": item.get("id"),
                 "Disciplina 1": (item.get("disciplines") or [None, None])[0],
@@ -126,6 +113,7 @@ class ClashAnalyzerApp:
                 "Rework Grade 1": item.get("automatedAnalysis", {}).get("first", {}).get("reworkGrade"),
                 "Rework Grade 2": item.get("automatedAnalysis", {}).get("second", {}).get("reworkGrade"),
                 "Quadrante": extract_quadrant(item),
+                "BIM": bim_normas,
                 "Location X": (item.get("location") or [None, None, None])[0],
                 "Location Y": (item.get("location") or [None, None, None])[1],
                 "Location Z": (item.get("location") or [None, None, None])[2],
@@ -146,12 +134,9 @@ class ClashAnalyzerApp:
     def show_combinations(self, df, col1, col2):
         all_discs = pd.unique(pd.concat([df["Disciplina 1"], df["Disciplina 2"]]).fillna("Unknown"))
         combo = pd.DataFrame(0, index=all_discs, columns=all_discs)
-
         for _, r in df.iterrows():
             d1, d2 = r["Disciplina 1"] or "Unknown", r["Disciplina 2"] or "Unknown"
             combo.at[d1, d2] += 1
-
-        colors = self.generate_colors(all_discs)
         max_val = combo.values.max()
         grid = combo.style.applymap(lambda v: self.color_cells(v, max_val))
         col1.markdown("Combinação de disciplinas (Grid)")
@@ -160,66 +145,84 @@ class ClashAnalyzerApp:
         combo_df = combo.stack().reset_index()
         combo_df.columns = ["Disciplina 1", "Disciplina 2", "Contagem"]
         combo_df = combo_df[combo_df["Contagem"] > 0]
+
+        combo_df = combo_df.sort_values("Contagem", ascending=False).head(20)
         combo_df["Combinação"] = combo_df["Disciplina 1"] + " × " + combo_df["Disciplina 2"]
+        
+        fig = px.bar(
+            combo_df, x="Combinação", y="Contagem",
+            text="Contagem", color="Contagem",
+            color_continuous_scale="RdYlGn_r",
+            title="Top 20 Clashes por Combinação de Disciplinas"
+        )
+        fig.update_layout(xaxis_tickangle=-45, coloraxis_colorbar=dict(title="Qtd. Clashes"))
+        col2.plotly_chart(fig, use_container_width=True)
+
+    def show_bim_combinations(self, df, col1, col2):
+        bim_list = []
+        for val in df["BIM"].dropna():
+            parts = val.split(" / ")
+            if len(parts) == 2:
+                bim_list.extend(parts)
+        all_bim = sorted(pd.unique(bim_list))
+        combo_bim = pd.DataFrame(0, index=all_bim, columns=all_bim)
+
+        for _, r in df.iterrows():
+            parts = (r["BIM"] or "Unknown").split(" / ")
+            b1 = parts[0] if len(parts) > 0 else "Unknown"
+            b2 = parts[1] if len(parts) > 1 else "Unknown"
+            if b1 not in combo_bim.index:
+                combo_bim.loc[b1] = 0
+                combo_bim[b1] = 0
+            if b2 not in combo_bim.columns:
+                combo_bim[b2] = 0
+                combo_bim.loc[b2] = 0
+            combo_bim.at[b1, b2] += 1
+
+        max_val = combo_bim.values.max()
+        grid = combo_bim.style.applymap(lambda v: self.color_cells(v, max_val))
+        col1.markdown("Combinação de códigos BIM (Grid)")
+        col1.dataframe(grid, use_container_width=True)
+
+        combo_df = combo_bim.stack().reset_index(name="Contagem")
+        combo_df.columns = ["BIM 1", "BIM 2", "Contagem"]
+        combo_df = combo_df[combo_df["Contagem"] > 0]
+
+        combo_df = combo_df.sort_values("Contagem", ascending=False).head(20)
+        combo_df["Combinação"] = combo_df["BIM 1"] + " × " + combo_df["BIM 2"]
 
         fig = px.bar(
             combo_df, x="Combinação", y="Contagem",
             text="Contagem", color="Contagem",
             color_continuous_scale="RdYlGn_r",
-            title="Clashes por Combinação de Disciplinas"
+            title="Top 20 Clashes por Combinação de Códigos BIM"
         )
         fig.update_layout(xaxis_tickangle=-45, coloraxis_colorbar=dict(title="Qtd. Clashes"))
         col2.plotly_chart(fig, use_container_width=True)
 
+
     def show_map(self, df):
         st.markdown("### 🌐 Mapa dos Clashs")
-
         map_df = df.dropna(subset=["Location X", "Location Y", "Location Z"])
         if map_df.empty:
             st.info("Sem coordenadas suficientes para plotar (X, Y, Z).")
             return
-
-        tab_quadrante, tab_rework, tab_severity, tab_distance = st.tabs(
-            ["Quadrante", "Rework Grade", "Severidade", "Distância"]
+        tab_quadrante, tab_rework, tab_severity, tab_distance, tab_norm = st.tabs(
+            ["Quadrante", "Rework Grade", "Severidade", "Distância", "BIM 3E"]
         )
-
         with tab_quadrante:
-            self._plot_3d_map(
-                map_df,
-                color_col="Quadrante",
-                title="Mapa 3D dos Clashs por Quadrante"
-            )
-
+            self._plot_3d_map(map_df, color_col="Quadrante", title="Mapa 3D dos Clashs por Quadrante")
         with tab_rework:
-            map_df["Rework Médio"] = map_df[
-                ["Rework Grade 1", "Rework Grade 2"]
-            ].mean(axis=1, skipna=True)
-            self._plot_3d_map(
-                map_df,
-                color_col="Rework Médio",
-                title="Mapa 3D por Grau Médio de Retrabalho",
-                color_scale="RdYlGn_r"
-            )
-
+            map_df["Rework Médio"] = map_df[["Rework Grade 1", "Rework Grade 2"]].mean(axis=1, skipna=True)
+            self._plot_3d_map(map_df, color_col="Rework Médio", title="Mapa 3D por Grau Médio de Retrabalho", color_scale="RdYlGn_r")
         with tab_severity:
-            self._plot_3d_map(
-                map_df,
-                color_col="Severity",
-                title="Mapa 3D por Severidade",
-                color_scale="Viridis"
-            )
-
+            self._plot_3d_map(map_df, color_col="Severity", title="Mapa 3D por Severidade", color_scale="Viridis")
         with tab_distance:
-            self._plot_3d_map(
-                map_df,
-                color_col="Distância",
-                title="Mapa 3D por Distância",
-                color_scale="RdYlGn_r"
-            )
-
+            self._plot_3d_map(map_df, color_col="Distância", title="Mapa 3D por Distância", color_scale="RdYlGn_r")
+        with tab_norm:
+            self._plot_3d_map(map_df, color_col="BIM", title="Mapa 3D por BIM 3E", color_scale="RdYlGn_r")
 
     def _plot_3d_map(self, df, color_col, title, color_scale=None):
-
         fig = px.scatter_3d(
             df,
             x="Location X",
@@ -232,9 +235,7 @@ class ClashAnalyzerApp:
             color_continuous_scale=color_scale or px.colors.qualitative.Bold,
             size_max=8
         )
-
         fig.update_traces(marker=dict(size=4, line=dict(width=0)))
-
         fig.update_layout(
             scene=dict(
                 xaxis=dict(title="X", backgroundcolor="rgb(15,15,15)", gridcolor="gray", showbackground=True),
@@ -251,7 +252,6 @@ class ClashAnalyzerApp:
             showlegend=True,
             legend=dict(bgcolor="rgba(0,0,0,0.5)", bordercolor="gray", font=dict(color="white", size=10))
         )
-
         fig.update_scenes(camera=dict(eye=dict(x=1.5, y=1.5, z=1.2)))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -265,7 +265,6 @@ class ClashAnalyzerApp:
             fig = px.bar(count, x="Disciplina", y="Contagem", color="Disciplina", color_discrete_map=colors)
             fig.update_layout(title="Distribuição de Disciplinas")
             st.plotly_chart(fig, use_container_width=True)
-
         with col2:
             quad = df.groupby("Quadrante").agg(Clashes=("Item ID", "count"), Severity=("Severity", "sum")).reset_index()
             fig = go.Figure()
@@ -284,7 +283,6 @@ class ClashAnalyzerApp:
         if table:
             with st.spinner("Gerando relatório automatizado..."):
                 self.process_report(table)
-
 
 if __name__ == "__main__":
     ClashAnalyzerApp().run()

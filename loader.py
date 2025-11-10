@@ -13,7 +13,6 @@ class Table:
         if table is None:
             return None
 
-        # === Cabeçalhos ===
         header_rows = table.find_all("tr", class_="headerRow")
         if len(header_rows) < 2:
             return None
@@ -24,7 +23,6 @@ class Table:
             for th in header_cells
         ]
 
-        # Trata duplicados
         seen = {}
         new_headers = []
         for h in headers:
@@ -35,7 +33,6 @@ class Table:
                 seen[h] = 0
                 new_headers.append(h)
 
-        # === Função local para processar uma linha ===
         def process_tr(tr):
             try:
                 return [
@@ -45,17 +42,14 @@ class Table:
             except Exception:
                 return None
 
-        # === Coleta das linhas ===
         content_rows = table.find_all("tr", class_="contentRow")
         if not content_rows:
             return None
 
-        # === Processamento paralelo das linhas ===
         data = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             results = list(executor.map(process_tr, content_rows))
 
-        # Remove linhas inválidas
         data = [r for r in results if r]
 
         return pd.DataFrame(data, columns=new_headers) if data else None

@@ -9,5 +9,6 @@ if __name__ == "__main__":
         soup = BeautifulSoup(f, "lxml")
         table = Table(soup)
         report = ClashReport(table)
+        report.generate_report()
         # exporter = BCFExporter(report)
         # exporter.export()
