@@ -88,6 +88,12 @@ class ClashAnalyzerApp:
         self.show_distribution(df)
 
         with st.expander("Visualizar JSON (10 primeiros)"):
+            st.download_button(
+                label="Download JSON",
+                data=json.dumps(data, indent=4, ensure_ascii=False),
+                file_name="clash_report.json",
+                mime="application/json",
+            )
             st.json(data[:10])
 
     def flatten(self, data):

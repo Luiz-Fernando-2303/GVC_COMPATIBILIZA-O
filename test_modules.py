@@ -10,5 +10,6 @@ if __name__ == "__main__":
         table = Table(soup)
         report = ClashReport(table)
         report.generate_report()
+        print(report.table.df)
         # exporter = BCFExporter(report)
         # exporter.export()
