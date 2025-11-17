@@ -4,12 +4,7 @@ from loader import Table
 # from bcf_exporter import BCFExporter
     
 if __name__ == "__main__":
-
-    with open("Example.html", "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "lxml")
-        table = Table(soup)
-        report = ClashReport(table)
-        report.generate_report()
-        print(report.table.df)
-        # exporter = BCFExporter(report)
-        # exporter.export()
+    import streamlit.web.cli as stcli
+    import sys
+    sys.argv = ["streamlit", "run", "app.py", "--server.maxUploadSize=1024", "--logger.level=debug"]
+    sys.exit(stcli.main())
