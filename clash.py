@@ -242,7 +242,7 @@ class ClashReport:
             return self.CACHE[string]
         for key in self.CACHE.keys():
             try:
-                if fuzz.ratio(key, string) > 50:
+                if fuzz.ratio(key, string) > 80:
                     return self.CACHE[key]
             except Exception:
                 continue

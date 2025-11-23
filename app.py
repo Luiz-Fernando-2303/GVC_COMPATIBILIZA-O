@@ -6,7 +6,8 @@ import pandas as pd
 from bs4 import BeautifulSoup
 import plotly.express as px
 import plotly.graph_objects as go
-from test_modules import Table, ClashReport
+from clash import ClashReport
+from loader import Table
 
 class ConfigManager:
     PATH = "config.json"
@@ -64,9 +65,14 @@ class ClashAnalyzerApp:
 
     def sidebar(self):
         st.sidebar.header("Configurações")
+
+        # ---------------------------
+        # PESOS POR DISCIPLINA
+        # ---------------------------
         st.sidebar.subheader("Pesos por Disciplina")
         self.config.setdefault("weights", {})
         weights = dict(self.config["weights"])
+
         for disc in list(weights.keys()):
             new_val = st.sidebar.number_input(
                 disc, min_value=0.0, max_value=10.0, step=0.1,
@@ -78,86 +84,128 @@ class ClashAnalyzerApp:
                 st.session_state.force_rerun = True
 
         st.sidebar.markdown("---")
+
+        # ---------------------------
+        # ADICIONAR NOVA DISCIPLINA
+        # ---------------------------
         st.sidebar.subheader("Gerenciar Disciplinas")
+
         new_disc = st.sidebar.text_input("Nova disciplina", key="input_new_disc")
         new_weight = st.sidebar.number_input(
             "Peso da nova disciplina", 0.0, 10.0, 1.0, 0.1, key="input_new_weight"
         )
+
         if st.sidebar.button("Adicionar disciplina", key="btn_add_disc"):
-            if new_disc:
+            if new_disc.strip():
                 self.config["weights"][new_disc] = float(new_weight)
                 ConfigManager.save(self.config)
                 st.session_state.force_rerun = True
 
         st.sidebar.markdown("---")
+
+        # ---------------------------
+        # MAPEAMENTO ARQUIVOS → DISCIPLINAS (somente campos texto)
+        # ---------------------------
         st.sidebar.subheader("Mapeamento de Arquivos → Disciplina")
+
         self.config.setdefault("files", {})
         files = dict(self.config["files"])
+
         if not files:
             st.sidebar.info("Nenhum arquivo configurado.")
 
         for fname in list(files.keys()):
-            cols = st.sidebar.columns([3, 2, 1])
+            cols = st.sidebar.columns([3, 3, 1])
+
+            # Nome do arquivo editável
             with cols[0]:
-                st.text_input(f"arquivo_{fname}", value=fname, disabled=True, key=f"file_name_{fname}")
-            with cols[1]:
-                current = self.config["files"].get(fname)
-                weight_keys = list(self.config["weights"].keys())
-                selection = st.selectbox(
-                    f"disc_for_{fname}", options=weight_keys,
-                    index=weight_keys.index(current) if current in weight_keys else 0,
-                    key=f"file_disc_{fname}"
+                new_name = st.text_input(
+                    "Arquivo",
+                    value=fname,
+                    key=f"file_name_{fname}"
                 )
-                if selection != current:
-                    self.config["files"][fname] = selection
+
+                if new_name != fname and new_name.strip():
+                    self.config["files"][new_name] = self.config["files"].pop(fname)
                     ConfigManager.save(self.config)
                     st.session_state.force_rerun = True
+
+            # Disciplina também editável
+            with cols[1]:
+                current_disc = self.config["files"].get(fname, "")
+                new_disc = st.text_input(
+                    "Disciplina",
+                    value=current_disc,
+                    key=f"file_disc_{fname}"
+                )
+
+                if new_disc != current_disc:
+                    self.config["files"][fname] = new_disc
+                    ConfigManager.save(self.config)
+                    st.session_state.force_rerun = True
+
+            # Botão remover
             with cols[2]:
-                if st.button("Remover", key=f"btn_remove_{fname}"):
+                if st.button("🗑️", key=f"btn_remove_{fname}"):
                     del self.config["files"][fname]
                     ConfigManager.save(self.config)
                     st.session_state.force_rerun = True
 
         st.sidebar.markdown("---")
+
+        # ---------------------------
+        # ADICIONAR NOVO ARQUIVO (somente texto)
+        # ---------------------------
         st.sidebar.subheader("Adicionar arquivo")
+
         new_file = st.sidebar.text_input("Novo arquivo (nome.ext)", key="input_new_file")
-        weight_keys = list(self.config["weights"].keys())
-        if weight_keys:
-            new_file_disc = st.sidebar.selectbox(
-                "Disciplina do novo arquivo", options=weight_keys, key="input_new_file_disc"
-            )
-        else:
-            new_file_disc = st.sidebar.text_input("Disciplina do novo arquivo", key="input_new_file_disc_free")
+
+        new_file_disc = st.sidebar.text_input(
+            "Disciplina do novo arquivo", key="input_new_file_disc"
+        )
+
         if st.sidebar.button("Adicionar arquivo", key="btn_add_file"):
-            if new_file:
+            if new_file.strip():
                 self.config["files"][new_file] = new_file_disc
                 ConfigManager.save(self.config)
                 st.session_state.force_rerun = True
 
         st.sidebar.markdown("---")
+
+        # ---------------------------
+        # IMPORTAR PLANILHA
+        # ---------------------------
         st.sidebar.subheader("Importar configuração via planilha")
+
         config_file = st.sidebar.file_uploader(
-            "Importar CSV ou Excel (arquivo / disciplina)", type=["csv", "xlsx"],
+            "Importar CSV ou Excel (arquivo / disciplina)",
+            type=["csv", "xlsx"],
             key="uploader_config"
         )
+
         if config_file is not None:
             try:
                 if config_file.name.endswith(".csv"):
                     df = self.read_csv_safely(config_file)
+                    df.columns = [col.replace("\t", "").replace(" ", "_") for col in df.columns]
                 else:
                     df = pd.read_excel(config_file)
-                if {"arquivo", "disciplina"}.issubset(df.columns):
-                    for _, row in df.iterrows():
-                        self.config["files"][str(row["arquivo"])] = str(row["disciplina"])
-                    ConfigManager.save(self.config)
-                    st.sidebar.success("Configurações importadas.")
-                    st.session_state.force_rerun = True
-                else:
-                    st.sidebar.error("A planilha deve conter as colunas: arquivo, disciplina")
+
+                for _, row in df.iterrows():
+                    self.config["files"][str(row["arquivo"])] = str(row["disciplina"])
+
+                ConfigManager.save(self.config)
+                st.sidebar.success("Configurações importadas.")
+                st.session_state.force_rerun = True
+
             except Exception as e:
                 st.sidebar.error(f"Erro ao importar: {e}")
 
         st.sidebar.markdown("---")
+
+        # ---------------------------
+        # SALVAR CONFIGURAÇÕES
+        # ---------------------------
         if st.sidebar.button("Salvar Configurações", key="btn_save_config"):
             ConfigManager.save(self.config)
             st.session_state.force_rerun = True
@@ -186,6 +234,40 @@ class ClashAnalyzerApp:
             return table
         st.warning("Nenhuma tabela encontrada no arquivo.")
         return None
+    
+    def categorize(self, value):
+        if value is None or value == "":
+            return ""
+        if value < 10:
+            return "baixo"
+        elif value < 20:
+            return "medio"
+        else:
+            return "alto"
+
+
+    def normalize_clash_data(self, data):
+        """
+        Normaliza os valores de severity e reworkGrade em 'alto', 'medio' e 'baixo'.
+        Modifica o dicionário data diretamente.
+        """
+        for item in data:
+            analysis = item.get("automatedAnalysis", {})
+
+            # Normaliza severity
+            severity_val = analysis.get("severity")
+            analysis["severity"] =  self.categorize(severity_val)
+
+            # Normaliza reworkGrade dos dois lados
+            first_rg = analysis.get("first", {}).get("reworkGrade")
+            second_rg = analysis.get("second", {}).get("reworkGrade")
+
+            if "first" in analysis:
+                analysis["first"]["reworkGrade"] = self.categorize(first_rg)
+            if "second" in analysis:
+                analysis["second"]["reworkGrade"] = self.categorize(second_rg)
+
+        return data
 
     def process_report(self, table):
         report = ClashReport(table)
@@ -208,6 +290,8 @@ class ClashAnalyzerApp:
         self.show_bim_combinations(df, col1, col2)
         self.show_map(df)
         self.show_distribution(df)
+
+        data = self.normalize_clash_data(data)
 
         with st.expander("Visualizar JSON (10 primeiros)"):
             st.download_button(
