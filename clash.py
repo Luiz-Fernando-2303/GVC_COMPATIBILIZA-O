@@ -6,9 +6,6 @@ from loader import Table
 import requests
 from rapidfuzz import fuzz
 
-# ============================
-# Load CONFIG
-# ============================
 try:
     with open("config.json", "r", encoding="utf-8") as f:
         CONFIG = json.load(f)
@@ -29,16 +26,8 @@ except Exception:
     with open("config.json", "w", encoding="utf-8") as f:
         json.dump(CONFIG, f, ensure_ascii=False, indent=2)
 
-
-# =====================================================================
-#                          CLASS CLASH REPORT
-# =====================================================================
-
 class ClashReport:
 
-    # --------------------------------
-    # Load CACHE or create one
-    # --------------------------------
     try:
         with open("cache.json", "r", encoding="utf-8", errors="ignore") as f:
             CACHE = json.load(f)
@@ -52,19 +41,15 @@ class ClashReport:
 
     HAS_OWNER_GUID = False
     HAS_DEFAULT_ID = False
+    USE_OWNER_GUID = True
     cache_count = 0
 
-    # =====================================================================
-    # Constructor
-    # =====================================================================
-    def __init__(self, table: Table):
+    def __init__(self, table: Table, use_owner_guid=True):
+        self.USE_OWNER_GUID = use_owner_guid
         self.table = table
         self.CACHE = ClashReport.CACHE
         self._has_owner_guid()
 
-    # =====================================================================
-    # Detect if DF contains owner GUID
-    # =====================================================================
     def _has_owner_guid(self):
         df_cols = set(self.table.df.columns)
 
@@ -74,36 +59,24 @@ class ClashReport:
         if "GVC GUID" in df_cols:
             ClashReport.HAS_OWNER_GUID = True
 
-    # =====================================================================
-    # MAIN REPORT GENERATOR
-    # C = allow config + weights combination
-    # =====================================================================
     def generate_report(self, config=None, weights=None, max_workers=8):
 
         global CONFIG
 
-        # 1 — config inteiro substitui o CONFIG global
         if config is not None:
             CONFIG = config
 
-        # 2 — weights sobrescrevem apenas o bloco de pesos do config
         if weights is not None:
             if "weights" not in CONFIG:
                 CONFIG["weights"] = {}
             CONFIG["weights"].update(weights)
 
-        # --------------------------------
-        # Validações básicas
-        # --------------------------------
         if not hasattr(self, "table") or not hasattr(self.table, "df"):
             raise AttributeError("Objeto 'self.table.df' não encontrado.")
 
         if self.table.df.empty:
             return []
 
-        # --------------------------------
-        # Process row by row
-        # --------------------------------
         report_data = []
         for _, row in self.table.df.iterrows():
             try:
@@ -113,9 +86,6 @@ class ClashReport:
             except Exception:
                 continue
 
-        # --------------------------------
-        # Automated SEVERITY calculation
-        # --------------------------------
         alpha = 1.5
         min_distance = 0.01
 
@@ -151,9 +121,6 @@ class ClashReport:
         self.report = report_data
         return report_data
 
-    # =====================================================================
-    # Process a single row
-    # =====================================================================
     def _process_row(self, row):
         id_ = self._parse_clash_name(row.get("Clash Name", "0"))
         distance = self._parse_distance(row)
@@ -177,9 +144,6 @@ class ClashReport:
             "automatedAnalysis": automated_analysis
         }
 
-    # =====================================================================
-    # BUILD ITEMS INFO
-    # =====================================================================
     def _build_items_info(self, disciplines, row):
 
         def classify(idx):
@@ -234,9 +198,6 @@ class ClashReport:
             "second": build_item(disciplines[1], 1)
         }
 
-    # =====================================================================
-    # Cache search with fuzzy matching
-    # =====================================================================
     def search_on_cache(self, string):
         if string in self.CACHE:
             return self.CACHE[string]
@@ -248,9 +209,6 @@ class ClashReport:
                 continue
         return None
 
-    # =====================================================================
-    # Save cache
-    # =====================================================================
     def _save_cache(self):
         try:
             with open("cache.json", "w", encoding="utf-8") as f:
@@ -258,9 +216,6 @@ class ClashReport:
         except Exception:
             pass
 
-    # =====================================================================
-    # Parsers
-    # =====================================================================
     def _parse_distance(self, row):
         for name in ["Distance (m)", "Distance (mm)", "Distance"]:
             if name in row and row[name] not in [None, ""]:
@@ -294,14 +249,14 @@ class ClashReport:
             return [0.0, 0.0, 0.0]
 
     def _parse_identifier(self, items):
-        if self.HAS_OWNER_GUID:
+        if self.HAS_OWNER_GUID and self.USE_OWNER_GUID:
             return "GVC"
         try:
             if all(isinstance(int(str(i).replace("Element ID : ", "")), int) for i in items):
                 return "ElementID"
         except Exception:
             pass
-        if all(isinstance(i, str) for i in items):
+        if all(isinstance(i, str) for i in items) and self.USE_OWNER_GUID == False:
             return "GUID"
         return "Mixed"
 
@@ -319,7 +274,7 @@ class ClashReport:
         id1 = parse_id(row.get("Item ID"))
         id2 = parse_id(row.get("Item ID_1"))
 
-        if self.HAS_OWNER_GUID:
+        if self.HAS_OWNER_GUID and self.USE_OWNER_GUID:
             id1 = row.get("GVC GUID") or row.get("GUID") or id1
             id2 = row.get("GVC GUID_1") or row.get("GUID_1") or id2
 
@@ -358,9 +313,6 @@ class ClashReport:
         base = "Element Category"
         return row.get(base if idx == 0 else f"{base}_{idx}", "")
 
-    # =====================================================================
-    # Automated analysis stub
-    # =====================================================================
     def _build_automated_analysis(self):
         return {
             "first": {"reworkGrade": 0.0},
@@ -369,9 +321,6 @@ class ClashReport:
             "reworkCost": "0R$"
         }
 
-    # =====================================================================
-    # Flatten report to DataFrame
-    # =====================================================================
     def flatten_report(self):
         if not hasattr(self, "report") or not self.report:
             raise ValueError("Nenhum relatório encontrado.")

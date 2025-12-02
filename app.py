@@ -8,38 +8,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from clash import ClashReport
 from loader import Table
-
-class ConfigManager:
-    PATH = "config.json"
-    DEFAULT = {
-        "weights": {
-            "ARQ": 4.0,
-        },
-        "files": {
-            "190-0000.nwc": "ARQ",
-        }
-    }
-
-    @classmethod
-    def load(cls):
-        if not os.path.exists(cls.PATH):
-            cls.save(cls.DEFAULT)
-            return dict(cls.DEFAULT)
-        try:
-            with open(cls.PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if "weights" not in data or "files" not in data:
-                cls.save(cls.DEFAULT)
-                return dict(cls.DEFAULT)
-            return data
-        except Exception:
-            cls.save(cls.DEFAULT)
-            return dict(cls.DEFAULT)
-
-    @classmethod
-    def save(cls, config):
-        with open(cls.PATH, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
+from configManager import ConfigManager
+from sidebar import _render_add_discipline, _render_add_file, _render_file_mapping, _render_import, _render_weights_section
+from appComponents import *
 
 class ClashAnalyzerApp:
     def __init__(self):
@@ -49,228 +20,65 @@ class ClashAnalyzerApp:
             st.session_state.CONFIG = ConfigManager.load()
         if "force_rerun" not in st.session_state:
             st.session_state.force_rerun = False
+        if "use_owner_guid" not in st.session_state:
+            st.session_state.use_owner_guid = True
+        if "require_reupload" not in st.session_state:
+            st.session_state.require_reupload = False
         self.config = st.session_state.CONFIG
-
-    def read_csv_safely(self, file):
-        encodings = ["cp1252", "latin-1", "iso-8859-1", "utf-8"]
-        seps = [",", ";", "\t"]
-        for enc in encodings:
-            for sep in seps:
-                try:
-                    file.seek(0)
-                    return pd.read_csv(file, encoding=enc, sep=sep)
-                except Exception:
-                    pass
-        raise ValueError("Não foi possível detectar o encoding/sep do CSV.")
+        self.USE_OWNER_GUID = st.session_state.use_owner_guid
 
     def sidebar(self):
         st.sidebar.header("Configurações")
 
-        # ---------------------------
-        # PESOS POR DISCIPLINA
-        # ---------------------------
-        st.sidebar.subheader("Pesos por Disciplina")
+        if not self.config.get("files", {}):
+            st.sidebar.warning("Nenhuma disciplina configurada.")
+
         self.config.setdefault("weights", {})
-        weights = dict(self.config["weights"])
-
-        for disc in list(weights.keys()):
-            new_val = st.sidebar.number_input(
-                disc, min_value=0.0, max_value=10.0, step=0.1,
-                value=float(weights[disc]), key=f"weight_{disc}"
-            )
-            if float(new_val) != weights[disc]:
-                self.config["weights"][disc] = float(new_val)
-                ConfigManager.save(self.config)
-                st.session_state.force_rerun = True
-
-        st.sidebar.markdown("---")
-
-        # ---------------------------
-        # ADICIONAR NOVA DISCIPLINA
-        # ---------------------------
-        st.sidebar.subheader("Gerenciar Disciplinas")
-
-        new_disc = st.sidebar.text_input("Nova disciplina", key="input_new_disc")
-        new_weight = st.sidebar.number_input(
-            "Peso da nova disciplina", 0.0, 10.0, 1.0, 0.1, key="input_new_weight"
-        )
-
-        if st.sidebar.button("Adicionar disciplina", key="btn_add_disc"):
-            if new_disc.strip():
-                self.config["weights"][new_disc] = float(new_weight)
-                ConfigManager.save(self.config)
-                st.session_state.force_rerun = True
-
-        st.sidebar.markdown("---")
-
-        # ---------------------------
-        # MAPEAMENTO ARQUIVOS → DISCIPLINAS (somente campos texto)
-        # ---------------------------
-        st.sidebar.subheader("Mapeamento de Arquivos → Disciplina")
-
         self.config.setdefault("files", {})
-        files = dict(self.config["files"])
 
-        if not files:
-            st.sidebar.info("Nenhum arquivo configurado.")
-
-        for fname in list(files.keys()):
-            cols = st.sidebar.columns([3, 3, 1])
-
-            # Nome do arquivo editável
-            with cols[0]:
-                new_name = st.text_input(
-                    "Arquivo",
-                    value=fname,
-                    key=f"file_name_{fname}"
-                )
-
-                if new_name != fname and new_name.strip():
-                    self.config["files"][new_name] = self.config["files"].pop(fname)
-                    ConfigManager.save(self.config)
-                    st.session_state.force_rerun = True
-
-            # Disciplina também editável
-            with cols[1]:
-                current_disc = self.config["files"].get(fname, "")
-                new_disc = st.text_input(
-                    "Disciplina",
-                    value=current_disc,
-                    key=f"file_disc_{fname}"
-                )
-
-                if new_disc != current_disc:
-                    self.config["files"][fname] = new_disc
-                    ConfigManager.save(self.config)
-                    st.session_state.force_rerun = True
-
-            # Botão remover
-            with cols[2]:
-                if st.button("🗑️", key=f"btn_remove_{fname}"):
-                    del self.config["files"][fname]
-                    ConfigManager.save(self.config)
-                    st.session_state.force_rerun = True
+        st.sidebar.subheader("Pesos por Disciplina")
+        _render_weights_section(self)
 
         st.sidebar.markdown("---")
+        st.sidebar.subheader("Gerenciar Disciplinas")
+        _render_add_discipline(self)
 
-        # ---------------------------
-        # ADICIONAR NOVO ARQUIVO (somente texto)
-        # ---------------------------
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Mapeamento de Arquivos → Disciplina")
+        _render_file_mapping(self)
+
+        st.sidebar.markdown("---")
         st.sidebar.subheader("Adicionar arquivo")
-
-        new_file = st.sidebar.text_input("Novo arquivo (nome.ext)", key="input_new_file")
-
-        new_file_disc = st.sidebar.text_input(
-            "Disciplina do novo arquivo", key="input_new_file_disc"
-        )
-
-        if st.sidebar.button("Adicionar arquivo", key="btn_add_file"):
-            if new_file.strip():
-                self.config["files"][new_file] = new_file_disc
-                ConfigManager.save(self.config)
-                st.session_state.force_rerun = True
+        _render_add_file(self)
 
         st.sidebar.markdown("---")
-
-        # ---------------------------
-        # IMPORTAR PLANILHA
-        # ---------------------------
         st.sidebar.subheader("Importar configuração via planilha")
-
-        config_file = st.sidebar.file_uploader(
-            "Importar CSV ou Excel (arquivo / disciplina)",
-            type=["csv", "xlsx"],
-            key="uploader_config"
-        )
-
-        if config_file is not None:
-            try:
-                if config_file.name.endswith(".csv"):
-                    df = self.read_csv_safely(config_file)
-                    df.columns = [col.replace("\t", "").replace(" ", "_") for col in df.columns]
-                else:
-                    df = pd.read_excel(config_file)
-
-                for _, row in df.iterrows():
-                    self.config["files"][str(row["arquivo"])] = str(row["disciplina"])
-
-                ConfigManager.save(self.config)
-                st.sidebar.success("Configurações importadas.")
-                st.session_state.force_rerun = True
-
-            except Exception as e:
-                st.sidebar.error(f"Erro ao importar: {e}")
+        _render_import(self)
 
         st.sidebar.markdown("---")
+        use_owner_guid = st.sidebar.checkbox(
+            "Usar GUID do proprietário",
+            value=st.session_state.use_owner_guid
+        )
 
-        # ---------------------------
-        # SALVAR CONFIGURAÇÕES
-        # ---------------------------
-        if st.sidebar.button("Salvar Configurações", key="btn_save_config"):
+        if use_owner_guid != st.session_state.use_owner_guid:
+            st.session_state.use_owner_guid = use_owner_guid
+            self.USE_OWNER_GUID = use_owner_guid
+            if "uploaded_file" in st.session_state:
+                del st.session_state["uploaded_file"]
+            st.session_state.require_reupload = True
+            st.session_state.force_rerun = True
+            st.rerun()
+
+        if st.sidebar.button("Salvar Configurações"):
             ConfigManager.save(self.config)
+            st.sidebar.success("Configurações salvas.")
+
+        if st.sidebar.button("Atualizar Interface"):
             st.session_state.force_rerun = True
 
-    def upload_html(self):
-        st.markdown("### Envie o arquivo HTML do Clash Report (Navisworks)")
-        uploaded_file = st.file_uploader(
-            "Escolha o arquivo HTML", type=["html", "htm"], key="uploader_html"
-        )
-        if not uploaded_file:
-            return None
-        try:
-            content = uploaded_file.getvalue().decode("utf-8")
-        except Exception:
-            try:
-                content = uploaded_file.getvalue().decode("latin-1")
-            except Exception:
-                st.error("Erro ao decodificar o arquivo.")
-                return None
-        soup = BeautifulSoup(StringIO(content).read(), "lxml")
-        table = Table(soup)
-        df = table.df
-        if df is not None and not df.empty:
-            st.success("Arquivo carregado com sucesso!")
-            st.dataframe(df, use_container_width=True)
-            return table
-        st.warning("Nenhuma tabela encontrada no arquivo.")
-        return None
-    
-    def categorize(self, value):
-        if value is None or value == "":
-            return ""
-        if value < 10:
-            return "baixo"
-        elif value < 20:
-            return "medio"
-        else:
-            return "alto"
-
-
-    def normalize_clash_data(self, data):
-        """
-        Normaliza os valores de severity e reworkGrade em 'alto', 'medio' e 'baixo'.
-        Modifica o dicionário data diretamente.
-        """
-        for item in data:
-            analysis = item.get("automatedAnalysis", {})
-
-            # Normaliza severity
-            severity_val = analysis.get("severity")
-            analysis["severity"] =  self.categorize(severity_val)
-
-            # Normaliza reworkGrade dos dois lados
-            first_rg = analysis.get("first", {}).get("reworkGrade")
-            second_rg = analysis.get("second", {}).get("reworkGrade")
-
-            if "first" in analysis:
-                analysis["first"]["reworkGrade"] = self.categorize(first_rg)
-            if "second" in analysis:
-                analysis["second"]["reworkGrade"] = self.categorize(second_rg)
-
-        return data
-
     def process_report(self, table):
-        report = ClashReport(table)
+        report = ClashReport(table, self.USE_OWNER_GUID)
         data = report.generate_report(
             weights=self.config.get("weights", {}),
             config=self.config
@@ -281,7 +89,7 @@ class ClashAnalyzerApp:
             ConfigManager.save(self.config)
             return
 
-        df = self.flatten(data)
+        df = flatten(self, data)
         st.markdown("### Resultados da Análise")
         report_flat = report.flatten_report()
         st.dataframe(report_flat, use_container_width=True)
@@ -291,7 +99,7 @@ class ClashAnalyzerApp:
         self.show_map(df)
         self.show_distribution(df)
 
-        data = self.normalize_clash_data(data)
+        data = normalize_clash_data(self, data)
 
         with st.expander("Visualizar JSON (10 primeiros)"):
             st.download_button(
@@ -301,36 +109,6 @@ class ClashAnalyzerApp:
                 mime="application/json",
             )
             st.json(data[:10])
-
-    def flatten(self, data):
-        def extract_quadrant(item):
-            q1 = item.get("itemsInfo", {}).get("first", {}).get("quadrants", [])
-            q2 = item.get("itemsInfo", {}).get("second", {}).get("quadrants", [])
-            quadrants = [q for q in (q1 + q2) if q]
-            return quadrants[0] if quadrants else "Unknown"
-
-        rows = []
-        for item in data:
-            bim_normas = (
-                item.get("itemsInfo", {}).get("first", {}).get("norma_bim", "Unknown") +
-                " / " +
-                item.get("itemsInfo", {}).get("second", {}).get("norma_bim", "Unknown")
-            )
-            rows.append({
-                "Item ID": item.get("id"),
-                "Disciplina 1": (item.get("disciplines") or [None, None])[0],
-                "Disciplina 2": (item.get("disciplines") or [None, None])[1],
-                "Distância": item.get("distance"),
-                "Severity": item.get("automatedAnalysis", {}).get("severity"),
-                "Rework Grade 1": item.get("automatedAnalysis", {}).get("first", {}).get("reworkGrade"),
-                "Rework Grade 2": item.get("automatedAnalysis", {}).get("second", {}).get("reworkGrade"),
-                "Quadrante": extract_quadrant(item),
-                "BIM": bim_normas,
-                "Location X": (item.get("location") or [None, None, None])[0],
-                "Location Y": (item.get("location") or [None, None, None])[1],
-                "Location Z": (item.get("location") or [None, None, None])[2],
-            })
-        return pd.DataFrame(rows)
 
     def generate_colors(self, items):
         palette = px.colors.qualitative.Plotly
@@ -529,10 +307,19 @@ class ClashAnalyzerApp:
 
     def run(self):
         self.sidebar()
-        table = self.upload_html()
+
+        upload_key = f"html_upload_{st.session_state.use_owner_guid}"
+        table = upload_html(self, key=upload_key)
+
+        if st.session_state.get("require_reupload", False):
+            st.warning("O modo de GUID foi alterado. Envie novamente o arquivo HTML para continuar.")
+            st.session_state.require_reupload = False
+            return
+
         if table:
             with st.spinner("Gerando relatório automatizado..."):
                 self.process_report(table)
+
         if st.session_state.get("force_rerun", False):
             st.session_state["force_rerun"] = False
             st.rerun()
